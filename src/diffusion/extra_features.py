@@ -31,7 +31,8 @@ class ExtraFeatures:
         if extra_features_type in ['eigenvalues', 'all', 'all_olliver_ricci', 
                                    'all_forman_ricci', 'eigenvalues_olliver_ricci', 
                                    'eigenvalues_forman_ricci']:
-            self.eigenfeatures = EigenFeatures(mode='eigenvalues' if 'eigenvalues' in extra_features_type and 'all' not in extra_features_type else 'all')
+            mode = 'eigenvalues' if ('eigenvalues' in extra_features_type and 'all' not in extra_features_type) else 'all'
+            self.eigenfeatures = EigenFeatures(mode=mode)
 
     def __call__(self, noisy_data):
         n = noisy_data['node_mask'].sum(dim=1).unsqueeze(1) / self.max_n_nodes
@@ -136,8 +137,9 @@ class ExtraFeatures:
         E_t = noisy_data['E_t']
         node_mask = noisy_data['node_mask']
         
-        # Extract adjacency matrix (excluding no-edge type)
-        adj_matrix = E_t[..., 1:].sum(dim=-1).float()  # (bs, n, n)
+        # CORRECT: Extract binary adjacency matrix for Ricci computation
+        # Ricci curvature is mathematically defined on unweighted graphs
+        adj_matrix = (E_t[..., 1:].sum(dim=-1) > 0).float()  # (bs, n, n)
         
         bs, n, _ = adj_matrix.shape
         edge_curvatures = torch.zeros(bs, n, n, 1).type_as(adj_matrix)
@@ -152,7 +154,7 @@ class ExtraFeatures:
                 adj_b = adj_b * mask_b[:, None] * mask_b[None, :]
                 
                 # Convert to NetworkX graph
-                G = nx.from_numpy_array(adj_b)
+                G = nx.from_numpy_array(adj_b, create_using=nx.Graph)
                 
                 # Remove self-loops
                 G.remove_edges_from(nx.selfloop_edges(G))
@@ -182,10 +184,25 @@ class ExtraFeatures:
                         curvatures[i, j] = curv
                         curvatures[j, i] = curv  # Symmetric for undirected graphs
                 
-                # Normalize to [0, 1] range
-                # Ricci curvature typically ranges from -inf to 1, but most values are in [-2, 1]
-                curvatures_normalized = (curvatures + 2) / 3  # Map [-2, 1] to [0, 1]
-                curvatures_normalized = np.clip(curvatures_normalized, 0, 1)
+                # IMPROVED: Adaptive normalization using percentiles
+                # More robust to outliers than fixed [-2, 1] mapping
+                if np.any(curvatures != 0):
+                    # Get non-zero curvatures for statistics
+                    nonzero_curvs = curvatures[curvatures != 0]
+
+                    # Use percentile-based bounds (robust to outliers)
+                    min_curv = max(np.percentile(nonzero_curvs, 5), -2.0)
+                    max_curv = min(np.percentile(nonzero_curvs, 95), 1.0)
+
+                    if max_curv > min_curv:
+                        curvatures_normalized = (curvatures - min_curv) / (max_curv - min_curv)
+                        curvatures_normalized = np.clip(curvatures_normalized, 0, 1)
+                    else:
+                        # All curvatures are the same
+                        curvatures_normalized = np.ones_like(curvatures) * 0.5
+                else:
+                    # No edges have curvature
+                    curvatures_normalized = np.zeros_like(curvatures)
                 
                 # Convert back to tensor
                 edge_curvatures[b, :, :, 0] = torch.from_numpy(curvatures_normalized).type_as(adj_matrix)
@@ -205,7 +222,7 @@ class ExtraFeatures:
         
         Args:
             edge_curvatures: (bs, n, n, 1) - edge Ricci curvatures
-            adj_matrix: (bs, n, n) - adjacency matrix
+            adj_matrix: (bs, n, n) - binary adjacency matrix
             node_mask: (bs, n) - node mask
             
         Returns:
@@ -214,16 +231,16 @@ class ExtraFeatures:
         bs, n, _, _ = edge_curvatures.shape
         
         # Sum curvatures of incident edges for each node
-        # Since the graph is undirected, we sum both outgoing and incoming (they're the same)
         edge_curv_squeezed = edge_curvatures.squeeze(-1)  # (bs, n, n)
         
-        # Mask: only consider actual edges
+        # CORRECT: Use binary adjacency for masking
+        # adj_matrix is already binary from compute_ricci_curvature
         masked_curvatures = edge_curv_squeezed * adj_matrix  # (bs, n, n)
         
         # Sum curvatures of incident edges per node
         sum_curvatures = masked_curvatures.sum(dim=-1)  # (bs, n)
         
-        # Compute node degree
+        # Compute node degree (binary)
         degree = adj_matrix.sum(dim=-1)  # (bs, n)
         
         # Avoid division by zero
