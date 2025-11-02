@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from src import utils
+import os
 
 import networkx as nx
 from GraphRicciCurvature.OllivierRicci import OllivierRicci
@@ -163,12 +164,12 @@ class ExtraFeatures:
                 
                 # Compute Ricci curvature
                 if ricci_type == "olliver":
-                    orc = OllivierRicci(G, alpha=self.ricci_alpha, verbose="ERROR")
+                    orc = OllivierRicci(G, alpha=self.ricci_alpha,proc=os.cpu_count(), verbose="ERROR")
                     orc.compute_ricci_curvature()
                     G_ricci = orc.G
                     
                 elif ricci_type == "forman":
-                    frc = FormanRicci(G, verbose="ERROR")
+                    frc = FormanRicci(G,proc=os.cpu_count(), verbose="ERROR")
                     frc.compute_ricci_curvature()
                     G_ricci = frc.G
                 else:
