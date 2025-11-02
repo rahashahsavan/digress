@@ -12,11 +12,11 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.utilities.warnings import PossibleUserWarning
 
 from src import utils
-from metrics.abstract_metrics import TrainAbstractMetricsDiscrete, TrainAbstractMetrics
+from src.metrics.abstract_metrics import TrainAbstractMetricsDiscrete, TrainAbstractMetrics
 
-from diffusion_model import LiftedDenoisingDiffusion
-from diffusion_model_discrete import DiscreteDenoisingDiffusion
-from diffusion.extra_features import DummyExtraFeatures, ExtraFeatures
+from src.diffusion_model import LiftedDenoisingDiffusion
+from src.diffusion_model_discrete import DiscreteDenoisingDiffusion
+from src.diffusion.extra_features import DummyExtraFeatures, ExtraFeatures
 
 
 warnings.filterwarnings("ignore", category=PossibleUserWarning)
@@ -70,9 +70,9 @@ def main(cfg: DictConfig):
     dataset_config = cfg["dataset"]
 
     if dataset_config["name"] in ['sbm', 'comm20', 'planar']:
-        from datasets.spectre_dataset import SpectreGraphDataModule, SpectreDatasetInfos
-        from analysis.spectre_utils import PlanarSamplingMetrics, SBMSamplingMetrics, Comm20SamplingMetrics
-        from analysis.visualization import NonMolecularVisualization
+        from src.datasets.spectre_dataset import SpectreGraphDataModule, SpectreDatasetInfos
+        from src.analysis.spectre_utils import PlanarSamplingMetrics, SBMSamplingMetrics, Comm20SamplingMetrics
+        from src.analysis.visualization import NonMolecularVisualization
 
         datamodule = SpectreGraphDataModule(cfg)
         if dataset_config['name'] == 'sbm':
@@ -101,25 +101,25 @@ def main(cfg: DictConfig):
                         'extra_features': extra_features, 'domain_features': domain_features}
 
     elif dataset_config["name"] in ['qm9', 'guacamol', 'moses']:
-        from metrics.molecular_metrics import TrainMolecularMetrics, SamplingMolecularMetrics
-        from metrics.molecular_metrics_discrete import TrainMolecularMetricsDiscrete
-        from diffusion.extra_features_molecular import ExtraMolecularFeatures
-        from analysis.visualization import MolecularVisualization
+        from src.metrics.molecular_metrics import TrainMolecularMetrics, SamplingMolecularMetrics
+        from src.metrics.molecular_metrics_discrete import TrainMolecularMetricsDiscrete
+        from src.diffusion.extra_features_molecular import ExtraMolecularFeatures
+        from src.analysis.visualization import MolecularVisualization
 
         if dataset_config["name"] == 'qm9':
-            from datasets import qm9_dataset
+            from src.datasets import qm9_dataset
             datamodule = qm9_dataset.QM9DataModule(cfg)
             dataset_infos = qm9_dataset.QM9infos(datamodule=datamodule, cfg=cfg)
             train_smiles = qm9_dataset.get_train_smiles(cfg=cfg, train_dataloader=datamodule.train_dataloader(),
                                                         dataset_infos=dataset_infos, evaluate_dataset=False)
         elif dataset_config['name'] == 'guacamol':
-            from datasets import guacamol_dataset
+            from src.datasets import guacamol_dataset
             datamodule = guacamol_dataset.GuacamolDataModule(cfg)
             dataset_infos = guacamol_dataset.Guacamolinfos(datamodule, cfg)
             train_smiles = None
 
         elif dataset_config.name == 'moses':
-            from datasets import moses_dataset
+            from src.datasets import moses_dataset
             datamodule = moses_dataset.MosesDataModule(cfg)
             dataset_infos = moses_dataset.MOSESinfos(datamodule, cfg)
             train_smiles = None
