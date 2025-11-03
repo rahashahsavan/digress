@@ -123,82 +123,102 @@ class ExtraFeatures:
             raise ValueError(f"Features type {self.features_type} not implemented")
 
     def compute_ricci_curvature(self, noisy_data, ricci_type):
-        """
-        Compute Ricci curvature for edges and aggregate to nodes.
-        
+        """ Compute Ricci curvature for edges and aggregate to nodes.
+
         Args:
             noisy_data: Dictionary containing graph data
+                - 'E_t': (bs, n, n, e_types) probabilistic edge tensor
+                - 'node_mask': (bs, n)
             ricci_type: 'olliver' or 'forman'
-            
+
         Returns:
             node_ricci: (bs, n, 1) - averaged Ricci curvature per node
             edge_ricci: (bs, n, n, 1) - Ricci curvature per edge
         """
         E_t = noisy_data['E_t']
         node_mask = noisy_data['node_mask']
-        
-        # Extract adjacency matrix (excluding no-edge type)
+
+        # Aggregate probabilities over all edge types except 'no-edge'
         adj_matrix = E_t[..., 1:].sum(dim=-1).float()  # (bs, n, n)
-        
         bs, n, _ = adj_matrix.shape
+
         edge_curvatures = torch.zeros(bs, n, n, 1).type_as(adj_matrix)
-        
+
         for b in range(bs):
             try:
-                # Get adjacency matrix for this graph
+                # Get adjacency matrix for this graph (as numpy)
                 adj_b = adj_matrix[b].cpu().numpy()
                 mask_b = node_mask[b].cpu().numpy().astype(bool)
-                
+
                 # Apply node mask
                 adj_b = adj_b * mask_b[:, None] * mask_b[None, :]
-                
-                # Convert to NetworkX graph
-                G = nx.from_numpy_array(adj_b)
-                
-                # Remove self-loops
+
+                # Skip empty graphs
+                if np.sum(adj_b) == 0:
+                    continue
+
+                # --- convert probabilities -> distances ---
+                eps = 1e-9
+                dist_b = -np.log(adj_b + eps)
+                dist_b = np.clip(dist_b, 0, 20)  # limit extreme distances
+
+                # Apply mask again (safety)
+                dist_b = dist_b * mask_b[:, None] * mask_b[None, :]
+
+                # Build weighted graph for curvature computation
+                G = nx.from_numpy_array(dist_b)
                 G.remove_edges_from(nx.selfloop_edges(G))
-                
-                # Skip if graph has no edges
+
                 if G.number_of_edges() == 0:
                     continue
-                
-                # Compute Ricci curvature
+
+                # --- Compute Ricci curvature ---
                 if ricci_type == "olliver":
-                    orc = OllivierRicci(G, alpha=self.ricci_alpha,proc=os.cpu_count(), verbose="ERROR")
+                    orc = OllivierRicci(
+                        G,
+                        alpha=self.ricci_alpha,
+                        proc=os.cpu_count(),
+                        verbose="ERROR"
+                    )
                     orc.compute_ricci_curvature()
                     G_ricci = orc.G
-                    
+
                 elif ricci_type == "forman":
-                    frc = FormanRicci(G,proc=os.cpu_count(), verbose="ERROR")
+                    frc = FormanRicci(
+                        G,
+                        proc=os.cpu_count(),
+                        verbose="ERROR"
+                    )
                     frc.compute_ricci_curvature()
                     G_ricci = frc.G
                 else:
                     raise ValueError(f"Unknown curvature type: {ricci_type}")
-                
-                # Extract curvature values for each edge
+
+                # Extract curvature values
                 curvatures = np.zeros((n, n))
                 for (i, j) in G_ricci.edges():
                     if 'ricciCurvature' in G_ricci[i][j]:
                         curv = G_ricci[i][j]['ricciCurvature']
                         curvatures[i, j] = curv
-                        curvatures[j, i] = curv  # Symmetric for undirected graphs
-                
-                # Normalize to [0, 1] range
-                # Ricci curvature typically ranges from -inf to 1, but most values are in [-2, 1]
-                curvatures_normalized = (curvatures + 2) / 3  # Map [-2, 1] to [0, 1]
+                        curvatures[j, i] = curv  # symmetric
+
+                # Clean and normalize curvature values
+                curvatures = np.nan_to_num(curvatures, nan=0.0, posinf=0.0, neginf=0.0)
+                curvatures_normalized = (curvatures + 2) / 3  # map [-2,1] → [0,1]
                 curvatures_normalized = np.clip(curvatures_normalized, 0, 1)
-                
+
                 # Convert back to tensor
                 edge_curvatures[b, :, :, 0] = torch.from_numpy(curvatures_normalized).type_as(adj_matrix)
-                
+
             except Exception as e:
-                print(f"Warning: Failed to compute {ricci_type} Ricci curvature for graph {b}: {e}")
+                print(f"⚠️ Warning: Failed to compute {ricci_type} Ricci curvature for graph {b}: {e}")
                 continue
-        
-        # Compute node-level Ricci curvature (average of incident edges)
+
+        # --- Compute node-level Ricci curvature (average over edges) ---
         node_ricci = self.compute_node_ricci(edge_curvatures, adj_matrix, node_mask)
-        
+
         return node_ricci, edge_curvatures
+
     
     def compute_node_ricci(self, edge_curvatures, adj_matrix, node_mask):
         """
