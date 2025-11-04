@@ -57,6 +57,30 @@ Note: graph_tool and torch_geometric currently seem to conflict on MacOS, I have
   - To run the discrete model: `python3 main.py`
   - You can specify the dataset with `python3 main.py dataset=guacamol`. Look at `configs/dataset` for the list
 of datasets that are currently available
+  
+### Ricci curvature extra features (Ollivier/Forman)
+
+To enable Ricci curvature-based extra features during training/sampling, set `model.extra_features`:
+
+- `olliver_ricci`: only Ollivier Ricci features
+- `cycle_olliver_ricci`: cycles + Ollivier Ricci
+- `eigenvalues_olliver_ricci`: eigenvalues + cycles + Ollivier Ricci
+- `all_olliver_ricci`: all features (eigenvalues, non-LCC indicator, k eigenvectors, cycles) + Ollivier Ricci
+
+Forman variants are analogous: `forman_ricci`, `cycle_forman_ricci`, `eigenvalues_forman_ricci`, `all_forman_ricci`.
+
+Dependencies:
+
+```bash
+pip install GraphRicciCurvature networkx
+```
+
+Example (QM9 without hydrogens, discrete model, Ollivier Ricci with all features):
+
+```bash
+python3 -m src.main +experiment=qm9_no_h.yaml dataset=qm9 model=discrete \
+  model.extra_features=all_olliver_ricci general.wandb=offline dataset.num_workers=0
+```
     
 ## Checkpoints
 

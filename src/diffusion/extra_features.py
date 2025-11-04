@@ -202,10 +202,22 @@ class ExtraFeatures:
                         curvatures[i, j] = curv
                         curvatures[j, i] = curv  # symmetric
 
-                # Clean and normalize curvature values
+                # Clean and normalize curvature values (adaptive percentile-based)
                 curvatures = np.nan_to_num(curvatures, nan=0.0, posinf=0.0, neginf=0.0)
-                curvatures_normalized = (curvatures + 2) / 3  # map [-2,1] → [0,1]
-                curvatures_normalized = np.clip(curvatures_normalized, 0, 1)
+                if np.any(curvatures != 0):
+                    nonzero_curvs = curvatures[curvatures != 0]
+                    # Percentile-based bounds with conservative clamps to [-2, 1]
+                    min_curv = max(np.percentile(nonzero_curvs, 5), -2.0)
+                    max_curv = min(np.percentile(nonzero_curvs, 95), 1.0)
+                    if max_curv > min_curv:
+                        curvatures_normalized = (curvatures - min_curv) / (max_curv - min_curv + 1e-12)
+                        curvatures_normalized = np.clip(curvatures_normalized, 0, 1)
+                    else:
+                        # All curvatures effectively identical
+                        curvatures_normalized = np.full_like(curvatures, 0.5)
+                else:
+                    # No curvature values present
+                    curvatures_normalized = np.zeros_like(curvatures)
 
                 # Convert back to tensor
                 edge_curvatures[b, :, :, 0] = torch.from_numpy(curvatures_normalized).type_as(adj_matrix)
