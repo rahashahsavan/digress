@@ -157,16 +157,8 @@ class ExtraFeatures:
                 if np.sum(adj_b) == 0:
                     continue
 
-                # --- convert probabilities -> distances ---
-                eps = 1e-9
-                dist_b = -np.log(adj_b + eps)
-                dist_b = np.clip(dist_b, 0, 20)  # limit extreme distances
-
-                # Apply mask again (safety)
-                dist_b = dist_b * mask_b[:, None] * mask_b[None, :]
-
                 # Build weighted graph for curvature computation
-                G = nx.from_numpy_array(dist_b)
+                G = nx.from_numpy_array(adj_b)
                 G.remove_edges_from(nx.selfloop_edges(G))
 
                 if G.number_of_edges() == 0:
