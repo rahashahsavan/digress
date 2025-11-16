@@ -220,10 +220,8 @@ class ExtraFeatures:
                 print(f"⚠️ Warning: Failed to compute {ricci_type} Ricci curvature for graph {b}: {e}")
                 continue
 
-        node_ricci = torch.from_numpy(node_ricci).type_as(adj_matrix)
-        node_ricci_normalized = node_ricci / torch.sum(node_ricci, dim=-1, keepdim=True)
-        node_ricci_normalized = node_ricci_normalized * node_mask[b].unsqueeze(-1)
-        node_ricci_normalized = node_ricci_normalized.unsqueeze(-1)
+
+        
                 
 
         return node_ricci_normalized, edge_curvatures
