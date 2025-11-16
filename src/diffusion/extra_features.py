@@ -172,17 +172,19 @@ class ExtraFeatures:
                         proc=os.cpu_count(),
                         verbose="ERROR"
                     )
-                    orc.compute_ricci_curvature()
+                    orc.compute_ricci_curvature_edges()
                     G_ricci = orc.G
+                    node_ricci = [G_ricci.nodes[n]['ricciCurvature'] for n in G_ricci.nodes()]
 
                 elif ricci_type == "forman":
                     frc = FormanRicci(
                         G,
-                        proc=os.cpu_count(),
                         verbose="ERROR"
                     )
                     frc.compute_ricci_curvature()
                     G_ricci = frc.G
+                    # --- Compute node-level Ricci curvature (average over edges) ---
+                    node_ricci = [G_ricci.nodes[n]['formanCurvature'] for n in G_ricci.nodes()]
                 else:
                     raise ValueError(f"Unknown curvature type: {ricci_type}")
 
@@ -218,49 +220,15 @@ class ExtraFeatures:
                 print(f"⚠️ Warning: Failed to compute {ricci_type} Ricci curvature for graph {b}: {e}")
                 continue
 
-        # --- Compute node-level Ricci curvature (average over edges) ---
-        node_ricci = self.compute_node_ricci(edge_curvatures, adj_matrix, node_mask)
+        node_ricci = torch.from_numpy(node_ricci).type_as(adj_matrix)
+        node_ricci_normalized = node_ricci / torch.sum(node_ricci, dim=-1, keepdim=True)
+        node_ricci_normalized = node_ricci_normalized * node_mask[b].unsqueeze(-1)
+        node_ricci_normalized = node_ricci_normalized.unsqueeze(-1)
+                
 
-        return node_ricci, edge_curvatures
+        return node_ricci_normalized, edge_curvatures
 
     
-    def compute_node_ricci(self, edge_curvatures, adj_matrix, node_mask):
-        """
-        Compute node-level Ricci curvature by averaging edge curvatures.
-        
-        Args:
-            edge_curvatures: (bs, n, n, 1) - edge Ricci curvatures
-            adj_matrix: (bs, n, n) - adjacency matrix
-            node_mask: (bs, n) - node mask
-            
-        Returns:
-            node_ricci: (bs, n, 1) - average Ricci curvature per node
-        """
-        bs, n, _, _ = edge_curvatures.shape
-        
-        # Sum curvatures of incident edges for each node
-        # Since the graph is undirected, we sum both outgoing and incoming (they're the same)
-        edge_curv_squeezed = edge_curvatures.squeeze(-1)  # (bs, n, n)
-        
-        # Mask: only consider actual edges
-        masked_curvatures = edge_curv_squeezed * adj_matrix  # (bs, n, n)
-        
-        # Sum curvatures of incident edges per node
-        sum_curvatures = masked_curvatures.sum(dim=-1)  # (bs, n)
-        
-        # Compute node degree
-        degree = adj_matrix.sum(dim=-1)  # (bs, n)
-        
-        # Avoid division by zero
-        degree = degree.clamp(min=1.0)
-        
-        # Average curvature per node
-        node_ricci = sum_curvatures / degree  # (bs, n)
-        
-        # Apply node mask
-        node_ricci = node_ricci * node_mask  # (bs, n)
-        
-        return node_ricci.unsqueeze(-1)  # (bs, n, 1)
 
 
 class NodeCycleFeatures:
