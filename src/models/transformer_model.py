@@ -282,3 +282,26 @@ class GraphTransformer(nn.Module):
         E = 1/2 * (E + torch.transpose(E, 1, 2))
 
         return utils.PlaceHolder(X=X, E=E, y=y).mask(node_mask)
+
+    def freeze_transformer_layers(self):
+        """Freeze all transformer layers (tf_layers) and keep only input/output MLPs trainable."""
+        # Freeze all transformer layers
+        for layer in self.tf_layers:
+            for param in layer.parameters():
+                param.requires_grad = False
+        
+        # Keep input/output MLPs trainable
+        for param in self.mlp_in_X.parameters():
+            param.requires_grad = True
+        for param in self.mlp_in_E.parameters():
+            param.requires_grad = True
+        for param in self.mlp_in_y.parameters():
+            param.requires_grad = True
+        for param in self.mlp_out_X.parameters():
+            param.requires_grad = True
+        for param in self.mlp_out_E.parameters():
+            param.requires_grad = True
+        for param in self.mlp_out_y.parameters():
+            param.requires_grad = True
+        
+        print("Transformer layers frozen. Only input/output MLPs are trainable.")

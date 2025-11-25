@@ -99,6 +99,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.number_chain_steps = cfg.general.number_chain_steps
         self.best_val_nll = 1e8
         self.val_counter = 0
+        
+        # Check if we should freeze transformer layers (for transfer learning with new features)
+        if hasattr(cfg.general, 'freeze_transformer') and cfg.general.freeze_transformer:
+            self.freeze_transformer_layers()
 
     def training_step(self, data, i):
         if data.edge_index.numel() == 0:
@@ -669,3 +673,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         extra_y = torch.cat((extra_y, t), dim=1)
 
         return utils.PlaceHolder(X=extra_X, E=extra_E, y=extra_y)
+
+    def freeze_transformer_layers(self):
+        """Freeze transformer layers and keep only input/output MLPs trainable.
+        This is useful when loading a pretrained model and adding new features (e.g., Ricci curvature)
+        to the input/output dimensions."""
+        self.model.freeze_transformer_layers()

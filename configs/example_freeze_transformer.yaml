@@ -1,0 +1,51 @@
+# Example configuration for transfer learning with frozen transformer layers
+# This config shows how to load a pretrained model and freeze transformer layers
+# while only training input/output MLPs for new features (e.g., Ricci curvature)
+
+# @package _global_
+general:
+    name: 'transfer_learning_ricci'
+    gpus: 1
+    wandb: 'online'
+    
+    # Path to the pretrained checkpoint (relative to outputs directory)
+    resume: 'path/to/pretrained/checkpoint.ckpt'
+    
+    # Set to true to freeze transformer layers and only train input/output MLPs
+    freeze_transformer: true
+    
+    check_val_every_n_epochs: 1
+    sample_every_val: 4
+    log_every_steps: 50
+
+train:
+    optimizer: adamw
+    n_epochs: 100
+    batch_size: 256
+    save_model: True
+    lr: 1e-4  # Lower learning rate for fine-tuning
+    num_workers: 4
+
+model:
+    # Model configuration - input/output dims will be automatically adjusted
+    # based on new features (e.g., Ricci curvature)
+    type: 'discrete'
+    transition: 'marginal'
+    model: 'graph_tf'
+    diffusion_steps: 500
+    diffusion_noise_schedule: 'cosine'
+    n_layers: 5
+    
+    # Add Ricci curvature features
+    extra_features: 'all_olliver_ricci'
+    ricci_alpha: 0.5
+    
+    hidden_mlp_dims: { 'X': 256, 'E': 128, 'y': 128 }
+    hidden_dims: { 'dx': 256, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128 }
+    
+    lambda_train: [5, 0]
+
+dataset:
+    name: 'moses'  # or your dataset name
+    # ... other dataset configs
+
