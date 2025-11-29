@@ -1,0 +1,66 @@
+# @package _global_
+# Config for training Moses dataset with Forman Ricci features
+# and frozen transformer layers (transfer learning from pretrained checkpoint)
+
+general:
+    name: 'moses_forman_ricci_freeze'
+    gpus: 1
+    wandb: 'online'
+    remove_h: True
+    
+    # مسیر چک‌پوینت (نسبت به دایرکتوری outputs)
+    # مثال: 'outputs/moses_pretrained/checkpoints/epoch=100.ckpt'
+    # یا: 'outputs/moses_pretrained/checkpoints/last.ckpt'
+    resume: 'path/to/your/checkpoint.ckpt'  # این را تغییر دهید
+    
+    # فعال کردن freeze برای لایه‌های transformer
+    freeze_transformer: true
+    
+    test_only: null
+    check_val_every_n_epochs: 1
+    val_check_interval: null
+    sample_every_val: 4
+    samples_to_generate: 256
+    samples_to_save: 20
+    chains_to_save: 5
+    log_every_steps: 50
+
+    final_model_samples_to_generate: 25000
+    final_model_samples_to_save: 50
+    final_model_chains_to_save: 20
+
+train:
+    optimizer: adamw
+    n_epochs: 100  # تعداد epoch کمتر برای fine-tuning
+    batch_size: 256
+    save_model: True
+    lr: 1e-4  # Learning rate کمتر برای fine-tuning
+    num_workers: 4
+
+model:
+    n_layers: 12  # باید با چک‌پوینت شما یکسان باشد
+    lambda_train: [5, 0]
+    type: 'discrete'
+    transition: 'marginal'
+    model: 'graph_tf'
+    diffusion_steps: 500
+    diffusion_noise_schedule: 'cosine'
+    
+    # استفاده از Forman Ricci
+    # گزینه‌ها: 'forman_ricci', 'cycle_forman_ricci', 'eigenvalues_forman_ricci', 'all_forman_ricci'
+    extra_features: 'all_forman_ricci'  # یا 'forman_ricci' برای فقط Ricci
+    
+    # پارامتر alpha برای Ricci (اختیاری)
+    ricci_alpha: 0.5
+
+    # Do not set hidden_mlp_E, dim_ffE too high, computing large tensors on the edges is costly
+    hidden_mlp_dims: { 'X': 256, 'E': 128, 'y': 256}
+
+    # The dimensions should satisfy dx % n_head == 0
+    # این مقادیر باید با چک‌پوینت شما یکسان باشند
+    hidden_dims: { 'dx': 256, 'de': 64, 'dy': 128, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 256}
+
+dataset:
+    name: 'moses'
+    # سایر تنظیمات dataset
+
