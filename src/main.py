@@ -24,6 +24,11 @@ warnings.filterwarnings("ignore", category=PossibleUserWarning)
 
 def get_resume(cfg, model_kwargs):
     """ Resumes a run. It loads previous config without allowing to update keys (used for testing). """
+    # FIX: Add a sys.modules alias to allow loading old checkpoints
+    import sys
+    from src import datasets
+    sys.modules['datasets'] = datasets
+
     saved_cfg = cfg.copy()
     name = cfg.general.name + '_resume'
     resume = cfg.general.test_only
@@ -52,6 +57,11 @@ def get_resume(cfg, model_kwargs):
 
 def get_resume_adaptive(cfg, model_kwargs):
     """ Resumes a run. It loads previous config but allows to make some changes (used for resuming training)."""
+    # FIX: Add a sys.modules alias to allow loading old checkpoints
+    import sys
+    from src import datasets
+    sys.modules['datasets'] = datasets
+
     saved_cfg = cfg.copy()
     # Fetch path to this file to get base path
     current_path = os.path.dirname(os.path.realpath(__file__))
