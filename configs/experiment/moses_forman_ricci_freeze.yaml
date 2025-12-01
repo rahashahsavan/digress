@@ -60,7 +60,9 @@ model:
     # این مقادیر باید با چک‌پوینت شما یکسان باشند
     hidden_dims: { 'dx': 256, 'de': 64, 'dy': 128, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 256}
 
+# Dataset config
 dataset:
     name: 'moses'
-    # سایر تنظیمات dataset
+
+    
 

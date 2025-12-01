@@ -28,25 +28,13 @@ def get_resume(cfg, model_kwargs):
     name = cfg.general.name + '_resume'
     resume = cfg.general.test_only
     if cfg.model.type == 'discrete':
-        # Use strict=False to allow loading when dimensions have changed (e.g., new features added)
-        model = DiscreteDenoisingDiffusion.load_from_checkpoint(resume, strict=False, **model_kwargs)
+        model = DiscreteDenoisingDiffusion.load_from_checkpoint(resume, **model_kwargs)
     else:
-        model = LiftedDenoisingDiffusion.load_from_checkpoint(resume, strict=False, **model_kwargs)
+        model = LiftedDenoisingDiffusion.load_from_checkpoint(resume, **model_kwargs)
     cfg = model.cfg
     cfg.general.test_only = resume
     cfg.general.name = name
     cfg = utils.update_config_with_new_keys(cfg, saved_cfg)
-    
-    # Update freeze_transformer from new config if specified
-    if hasattr(saved_cfg.general, 'freeze_transformer'):
-        cfg.general.freeze_transformer = saved_cfg.general.freeze_transformer
-    
-    # Freeze transformer layers if specified in config
-    if hasattr(cfg.general, 'freeze_transformer') and cfg.general.freeze_transformer:
-        if hasattr(model, 'freeze_transformer_layers'):
-            model.freeze_transformer_layers()
-            print("Transformer layers frozen after loading checkpoint.")
-    
     return cfg, model
 
 
@@ -60,10 +48,9 @@ def get_resume_adaptive(cfg, model_kwargs):
     resume_path = os.path.join(root_dir, cfg.general.resume)
 
     if cfg.model.type == 'discrete':
-        # Use strict=False to allow loading when dimensions have changed (e.g., new features added)
-        model = DiscreteDenoisingDiffusion.load_from_checkpoint(resume_path, strict=False, **model_kwargs)
+        model = DiscreteDenoisingDiffusion.load_from_checkpoint(resume_path, **model_kwargs)
     else:
-        model = LiftedDenoisingDiffusion.load_from_checkpoint(resume_path, strict=False, **model_kwargs)
+        model = LiftedDenoisingDiffusion.load_from_checkpoint(resume_path, **model_kwargs)
     new_cfg = model.cfg
 
     for category in cfg:
@@ -74,13 +61,6 @@ def get_resume_adaptive(cfg, model_kwargs):
     new_cfg.general.name = new_cfg.general.name + '_resume'
 
     new_cfg = utils.update_config_with_new_keys(new_cfg, saved_cfg)
-    
-    # Freeze transformer layers if specified in config
-    if hasattr(cfg.general, 'freeze_transformer') and cfg.general.freeze_transformer:
-        if hasattr(model, 'freeze_transformer_layers'):
-            model.freeze_transformer_layers()
-            print("Transformer layers frozen after loading checkpoint.")
-    
     return new_cfg, model
 
 
@@ -182,13 +162,10 @@ def main(cfg: DictConfig):
 
     utils.create_folders(cfg)
 
-    # Only create new model if not loaded from checkpoint
-    if not cfg.general.test_only and cfg.general.resume is None:
-        if cfg.model.type == 'discrete':
-            model = DiscreteDenoisingDiffusion(cfg=cfg, **model_kwargs)
-        else:
-            model = LiftedDenoisingDiffusion(cfg=cfg, **model_kwargs)
-    # If model was loaded from checkpoint, it's already created in get_resume/get_resume_adaptive
+    if cfg.model.type == 'discrete':
+        model = DiscreteDenoisingDiffusion(cfg=cfg, **model_kwargs)
+    else:
+        model = LiftedDenoisingDiffusion(cfg=cfg, **model_kwargs)
 
     callbacks = []
     if cfg.train.save_model:
