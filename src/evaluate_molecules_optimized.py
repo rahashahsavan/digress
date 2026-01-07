@@ -1,5 +1,5 @@
 """
-Evaluation script for generated molecules.
+Evaluation script for generated molecules - Optimized Version
 Computes: Validity, Uniqueness, Novelty, Scaff, FCD, Filter, SNN, IntDiv, IntDiv2, Frag
 """
 
@@ -18,6 +18,7 @@ import warnings
 import random
 import multiprocessing as mp
 from functools import partial
+from tqdm import tqdm
 
 # Suppress RDKit warnings
 from rdkit import RDLogger
@@ -42,7 +43,7 @@ try:
     MOSES_AVAILABLE = True
 except ImportError:
     MOSES_AVAILABLE = False
-    print("Warning: MOSES library not available. Filter and SNN metrics will use alternative implementations.")
+    print("Warning: MOSES library not available. Some metrics will use alternative implementations.")
 
 try:
     from fcd import get_fcd
@@ -125,38 +126,38 @@ def compute_novelty(unique_smiles: List[str], reference_smiles: Optional[List[st
     return novelty
 
 
-def compute_scaffold_similarity(unique_smiles: List[str], reference_smiles: Optional[List[str]] = None) -> float:
+def extract_scaffold(smiles: str) -> Optional[str]:
+    """Extract Murcko scaffold from a SMILES string."""
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is not None:
+            scaffold = MurckoScaffold.GetScaffoldForMol(mol)
+            return Chem.MolToSmiles(scaffold, canonical=True)
+    except:
+        pass
+    return None
+
+
+def compute_scaffold_similarity(unique_smiles: List[str], reference_smiles: Optional[List[str]] = None, n_jobs: int = -1) -> float:
     """Compute scaffold similarity: fraction of generated scaffolds present in reference set."""
     if reference_smiles is None:
         return -1.0
     
-    # Get scaffolds from generated molecules
-    generated_scaffolds = set()
-    for smiles in unique_smiles:
-        try:
-            mol = Chem.MolFromSmiles(smiles)
-            if mol is not None:
-                scaffold = MurckoScaffold.GetScaffoldForMol(mol)
-                scaffold_smiles = Chem.MolToSmiles(scaffold)
-                generated_scaffolds.add(scaffold_smiles)
-        except:
-            pass
+    if n_jobs == -1:
+        n_jobs = mp.cpu_count()
     
-    # Get scaffolds from reference molecules
-    reference_scaffolds = set()
-    for smiles in reference_smiles:
-        try:
-            mol = Chem.MolFromSmiles(smiles)
-            if mol is not None:
-                scaffold = MurckoScaffold.GetScaffoldForMol(mol)
-                scaffold_smiles = Chem.MolToSmiles(scaffold)
-                reference_scaffolds.add(scaffold_smiles)
-        except:
-            pass
+    # Parallel processing for scaffold extraction
+    if len(unique_smiles) > 500 and n_jobs > 1:
+        with mp.Pool(n_jobs) as pool:
+            gen_scaffolds = set(s for s in pool.map(extract_scaffold, unique_smiles) if s is not None)
+            ref_scaffolds = set(s for s in pool.map(extract_scaffold, reference_smiles) if s is not None)
+    else:
+        gen_scaffolds = set(s for s in map(extract_scaffold, unique_smiles) if s is not None)
+        ref_scaffolds = set(s for s in map(extract_scaffold, reference_smiles) if s is not None)
     
     # Compute intersection
-    common_scaffolds = generated_scaffolds.intersection(reference_scaffolds)
-    scaff = len(common_scaffolds) / len(generated_scaffolds) if len(generated_scaffolds) > 0 else 0.0
+    common_scaffolds = gen_scaffolds.intersection(ref_scaffolds)
+    scaff = len(common_scaffolds) / len(gen_scaffolds) if len(gen_scaffolds) > 0 else 0.0
     return scaff
 
 
@@ -174,50 +175,6 @@ def compute_fcd(unique_smiles: List[str], reference_smiles: Optional[List[str]] 
     except Exception as e:
         print(f"Error computing FCD: {e}")
         return -1.0
-
-
-def compute_filter(unique_smiles: List[str], n_jobs: int = -1) -> float:
-    """Compute Filter: fraction of molecules passing MOSES filters."""
-    if MOSES_AVAILABLE:
-        try:
-            device = 'cuda' if TORCH_AVAILABLE and torch.cuda.is_available() else 'cpu'
-            if n_jobs == -1:
-                n_jobs = mp.cpu_count()
-            metrics = get_all_metrics(
-                gen=unique_smiles,
-                train=None,
-                test=None,
-                device=device,
-                n_jobs=n_jobs
-            )
-            return metrics.get('Filters', -1.0)
-        except Exception as e:
-            print(f"Error computing Filter with MOSES: {e}")
-            # Fall through to alternative implementation
-    
-    # Alternative implementation using basic filters
-    if n_jobs == -1:
-        n_jobs = mp.cpu_count()
-    
-    def check_filter(smiles):
-        try:
-            mol = Chem.MolFromSmiles(smiles)
-            if mol is not None:
-                Chem.SanitizeMol(mol)
-                if not has_pains(mol):
-                    return True
-        except:
-            pass
-        return False
-    
-    if len(unique_smiles) > 1000 and n_jobs > 1:
-        with mp.Pool(n_jobs) as pool:
-            results = pool.map(check_filter, unique_smiles)
-            passed = sum(results)
-    else:
-        passed = sum(check_filter(s) for s in unique_smiles)
-    
-    return passed / len(unique_smiles) if len(unique_smiles) > 0 else 0.0
 
 
 # Initialize PAINS filter catalog (lazy loading)
@@ -260,6 +217,52 @@ def has_pains(mol) -> bool:
     return False
 
 
+def check_filter(smiles: str) -> bool:
+    """Check if a molecule passes filters."""
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is not None:
+            Chem.SanitizeMol(mol)
+            if not has_pains(mol):
+                return True
+    except:
+        pass
+    return False
+
+
+def compute_filter(unique_smiles: List[str], n_jobs: int = -1) -> float:
+    """Compute Filter: fraction of molecules passing MOSES filters."""
+    if MOSES_AVAILABLE:
+        try:
+            device = 'cuda' if TORCH_AVAILABLE and torch.cuda.is_available() else 'cpu'
+            if n_jobs == -1:
+                n_jobs = mp.cpu_count()
+            metrics = get_all_metrics(
+                gen=unique_smiles,
+                train=None,
+                test=None,
+                device=device,
+                n_jobs=n_jobs
+            )
+            return metrics.get('Filters', -1.0)
+        except Exception as e:
+            print(f"Error computing Filter with MOSES: {e}")
+            # Fall through to alternative implementation
+    
+    # Alternative implementation using basic filters
+    if n_jobs == -1:
+        n_jobs = mp.cpu_count()
+    
+    if len(unique_smiles) > 1000 and n_jobs > 1:
+        with mp.Pool(n_jobs) as pool:
+            results = pool.map(check_filter, unique_smiles)
+            passed = sum(results)
+    else:
+        passed = sum(check_filter(s) for s in unique_smiles)
+    
+    return passed / len(unique_smiles) if len(unique_smiles) > 0 else 0.0
+
+
 def compute_snn_batch(gen_smiles_batch: List[str], ref_fps: List) -> List[float]:
     """Compute SNN for a batch of generated SMILES."""
     similarities = []
@@ -285,10 +288,11 @@ def compute_snn_batch(gen_smiles_batch: List[str], ref_fps: List) -> List[float]
 
 def compute_snn(unique_smiles: List[str], reference_smiles: Optional[List[str]] = None, 
                 batch_size: int = 1000, n_jobs: int = -1) -> float:
-    """Compute SNN (Similarity to Nearest Neighbor) with batch processing for memory efficiency."""
+    """Compute SNN (Similarity to Nearest Neighbor) with batch processing."""
     if reference_smiles is None:
         return -1.0
     
+    # Try to use MOSES implementation first
     if MOSES_AVAILABLE:
         try:
             device = 'cuda' if TORCH_AVAILABLE and torch.cuda.is_available() else 'cpu'
@@ -308,9 +312,9 @@ def compute_snn(unique_smiles: List[str], reference_smiles: Optional[List[str]] 
     
     # Alternative implementation using Tanimoto similarity with batch processing
     # Pre-compute reference fingerprints for efficiency
-    print(f"  Pre-computing reference fingerprints ({len(reference_smiles)} molecules)...")
+    print(f"    Pre-computing reference fingerprints ({len(reference_smiles)} molecules)...")
     ref_fps = []
-    for ref_smiles in reference_smiles:
+    for ref_smiles in tqdm(reference_smiles, desc="    Computing ref fingerprints", leave=False):
         try:
             ref_mol = Chem.MolFromSmiles(ref_smiles)
             if ref_mol is not None:
@@ -322,9 +326,9 @@ def compute_snn(unique_smiles: List[str], reference_smiles: Optional[List[str]] 
     if len(ref_fps) == 0:
         return -1.0
     
-    # Process in batches to avoid memory issues
+    # Batch processing to avoid memory issues
     all_similarities = []
-    for i in range(0, len(unique_smiles), batch_size):
+    for i in tqdm(range(0, len(unique_smiles), batch_size), desc="    Computing SNN"):
         batch = unique_smiles[i:i+batch_size]
         batch_similarities = compute_snn_batch(batch, ref_fps)
         all_similarities.extend(batch_similarities)
@@ -364,7 +368,6 @@ def compute_internal_diversity(smiles_list: List[str], p: int = 1) -> float:
     
     if total_pairs > max_pairs:
         # Sample pairs randomly
-        indices = list(range(n_fps))
         pairs_to_compute = random.sample(
             [(i, j) for i in range(n_fps) for j in range(i + 1, n_fps)],
             min(max_pairs, total_pairs)
@@ -384,9 +387,8 @@ def compute_internal_diversity(smiles_list: List[str], p: int = 1) -> float:
     
     # IntDiv = 1 - mean(similarities)
     # IntDiv2 = 1 - sqrt(mean(similarities^2))
-    mean_sim = np.mean(similarities)
     if p == 1:
-        return 1.0 - mean_sim
+        return 1.0 - np.mean(similarities)
     elif p == 2:
         mean_sim_sq = np.mean([s**2 for s in similarities])
         return 1.0 - np.sqrt(mean_sim_sq)
@@ -394,50 +396,78 @@ def compute_internal_diversity(smiles_list: List[str], p: int = 1) -> float:
         raise ValueError(f"Invalid p value: {p}. Must be 1 or 2.")
 
 
-def get_fragments_fast(smiles: str) -> List[str]:
-    """Extract molecular fragments using circular fingerprints (faster than BRICS)."""
+def get_fragments_brics(smiles: str) -> List[str]:
+    """Extract molecular fragments using BRICS decomposition."""
     try:
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
-            # Use circular fingerprints as fragment representation
-            # This is much faster than BRICS decomposition
-            fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=1024)
-            # Convert to string representation
-            return [fp.ToBitString()]
+            # Use BRICS to break into fragments
+            # Note: BRICSDecompose returns a generator, convert to list
+            frags = Chem.rdmolops.BRICSDecompose(mol)
+            # Convert fragments to SMILES
+            fragment_smiles = []
+            for frag in frags:
+                try:
+                    frag_smiles = Chem.MolToSmiles(frag, canonical=True)
+                    fragment_smiles.append(frag_smiles)
+                except:
+                    continue
+            return fragment_smiles
     except:
         pass
     return []
 
 
-def compute_fragment_similarity(unique_smiles: List[str], reference_smiles: Optional[List[str]] = None,
-                                n_jobs: int = -1) -> float:
-    """Compute Fragment Similarity: similarity of fragment distributions (optimized version)."""
+def compute_fragment_similarity(unique_smiles: List[str], reference_smiles: Optional[List[str]] = None, n_jobs: int = -1) -> float:
+    """Compute Fragment Similarity: similarity of fragment distributions using BRICS."""
     if reference_smiles is None:
         return -1.0
     
-    # Use faster fragment extraction with parallel processing
+    # Try to use MOSES implementation first
+    if MOSES_AVAILABLE:
+        try:
+            device = 'cuda' if TORCH_AVAILABLE and torch.cuda.is_available() else 'cpu'
+            if n_jobs == -1:
+                n_jobs = mp.cpu_count()
+            metrics = get_all_metrics(
+                gen=unique_smiles,
+                train=reference_smiles,
+                test=None,
+                device=device,
+                n_jobs=n_jobs
+            )
+            frag_value = metrics.get('Frag', -1.0)
+            if frag_value != -1.0:
+                return frag_value
+        except Exception as e:
+            print(f"Error computing Frag with MOSES: {e}")
+            # Fall through to alternative implementation
+    
+    # Alternative implementation using BRICS fragments
     if n_jobs == -1:
         n_jobs = mp.cpu_count()
     
-    # Extract fragments in parallel
-    if len(unique_smiles) > 500 and n_jobs > 1:
-        with mp.Pool(n_jobs) as pool:
-            gen_fragments_list = pool.map(get_fragments_fast, unique_smiles)
-            ref_fragments_list = pool.map(get_fragments_fast, reference_smiles)
-    else:
-        gen_fragments_list = [get_fragments_fast(s) for s in unique_smiles]
-        ref_fragments_list = [get_fragments_fast(s) for s in reference_smiles]
+    def get_fragments(smiles_list):
+        """Extract molecular fragments (BRICS fragments) with parallel processing."""
+        fragments = []
+        if len(smiles_list) > 500 and n_jobs > 1:
+            with mp.Pool(n_jobs) as pool:
+                fragment_lists = pool.map(get_fragments_brics, smiles_list)
+                fragments = [f for frag_list in fragment_lists for f in frag_list]
+        else:
+            for smiles in smiles_list:
+                fragments.extend(get_fragments_brics(smiles))
+        return Counter(fragments)
     
-    # Flatten lists
-    gen_fragments = [f for frags in gen_fragments_list for f in frags]
-    ref_fragments = [f for frags in ref_fragments_list for f in frags]
+    gen_fragments = get_fragments(unique_smiles)
+    ref_fragments = get_fragments(reference_smiles)
     
     if len(gen_fragments) == 0 or len(ref_fragments) == 0:
         return -1.0
     
     # Compute Jaccard similarity of fragment sets
-    gen_set = set(gen_fragments)
-    ref_set = set(ref_fragments)
+    gen_set = set(gen_fragments.keys())
+    ref_set = set(ref_fragments.keys())
     
     intersection = gen_set.intersection(ref_set)
     union = gen_set.union(ref_set)
@@ -446,7 +476,7 @@ def compute_fragment_similarity(unique_smiles: List[str], reference_smiles: Opti
     return frag_sim
 
 
-def evaluate_molecules(generated_file: str, reference_file: Optional[str] = None,
+def evaluate_molecules(generated_file: str, reference_file: Optional[str] = None, 
                       n_jobs: int = -1, batch_size: int = 1000, use_moses_direct: bool = True) -> dict:
     """
     Evaluate generated molecules against reference set.
@@ -454,6 +484,9 @@ def evaluate_molecules(generated_file: str, reference_file: Optional[str] = None
     Args:
         generated_file: Path to file with generated SMILES (one per line)
         reference_file: Optional path to file with reference SMILES (for Novelty, Scaff, FCD, SNN, Frag)
+        n_jobs: Number of parallel jobs (-1 for all CPUs)
+        batch_size: Batch size for SNN computation
+        use_moses_direct: Whether to use MOSES get_all_metrics directly (faster if available)
     
     Returns:
         Dictionary with all computed metrics
@@ -470,7 +503,7 @@ def evaluate_molecules(generated_file: str, reference_file: Optional[str] = None
     
     # Use MOSES directly if available and requested
     if use_moses_direct and MOSES_AVAILABLE and reference_smiles is not None:
-        print("\nUsing MOSES metrics directly...")
+        print("\nUsing MOSES metrics directly (faster)...")
         try:
             device = 'cuda' if TORCH_AVAILABLE and torch.cuda.is_available() else 'cpu'
             if n_jobs == -1:
@@ -515,7 +548,7 @@ def evaluate_molecules(generated_file: str, reference_file: Optional[str] = None
                 frag = compute_fragment_similarity(unique_smiles, reference_smiles, n_jobs=n_jobs)
             if scaff == -1.0:
                 print("  Computing Scaff...")
-                scaff = compute_scaffold_similarity(unique_smiles, reference_smiles)
+                scaff = compute_scaffold_similarity(unique_smiles, reference_smiles, n_jobs=n_jobs)
             if fcd == -1.0:
                 print("  Computing FCD...")
                 fcd = compute_fcd(unique_smiles, reference_smiles)
@@ -543,7 +576,7 @@ def evaluate_molecules(generated_file: str, reference_file: Optional[str] = None
         
         # Scaff
         print("  Computing Scaff...")
-        scaff = compute_scaffold_similarity(unique_smiles, reference_smiles)
+        scaff = compute_scaffold_similarity(unique_smiles, reference_smiles, n_jobs=n_jobs)
         
         # FCD
         print("  Computing FCD...")
@@ -643,24 +676,24 @@ def save_results(results: dict, output_file: Optional[str] = None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Evaluate generated molecules',
+        description='Evaluate generated molecules - Optimized Version',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Evaluate without reference set (only Validity, Uniqueness, IntDiv, IntDiv2, Filter)
-  python src/evaluate_molecules.py --generated generated_samples/generated_smiles.txt
+  python src/evaluate_molecules_optimized.py --generated generated_smiles.txt
   
   # Evaluate with reference set (all metrics, uses MOSES directly if available)
-  python src/evaluate_molecules.py --generated generated_samples/generated_smiles.txt --reference data/train_smiles.txt
+  python src/evaluate_molecules_optimized.py --generated generated_smiles.txt --reference train_smiles.txt
   
-  # Use specific number of parallel jobs
-  python src/evaluate_molecules.py --generated generated_samples/generated_smiles.txt --reference data/train_smiles.txt --n-jobs 8
+  # Use 8 parallel jobs
+  python src/evaluate_molecules_optimized.py --generated generated_smiles.txt --reference train_smiles.txt --n_jobs 8
   
   # Disable direct MOSES usage (compute metrics individually)
-  python src/evaluate_molecules.py --generated generated_samples/generated_smiles.txt --reference data/train_smiles.txt --no-moses-direct
+  python src/evaluate_molecules_optimized.py --generated generated_smiles.txt --reference train_smiles.txt --no-moses-direct
   
-  # Save results as CSV
-  python src/evaluate_molecules.py --generated generated_samples/generated_smiles.txt --reference data/train_smiles.txt --output results.csv
+  # Save results to CSV
+  python src/evaluate_molecules_optimized.py --generated generated_smiles.txt --reference train_smiles.txt --output results.csv
         """
     )
     
@@ -686,14 +719,14 @@ Examples:
     )
     
     parser.add_argument(
-        '--n-jobs',
+        '--n_jobs',
         type=int,
         default=-1,
         help='Number of parallel jobs (-1 for all CPUs, default: -1)'
     )
     
     parser.add_argument(
-        '--batch-size',
+        '--batch_size',
         type=int,
         default=1000,
         help='Batch size for SNN computation (default: 1000)'
