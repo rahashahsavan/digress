@@ -268,23 +268,29 @@ def main(cfg: DictConfig):
     else:
         raise NotImplementedError("Unknown dataset {}".format(cfg["dataset"]))
 
+    # <<< --- START OF CORRECTION --- >>>
+    
     # Handle different modes: test only, resume, or fresh training
+    model = None
     if cfg.general.test_only:
         # Load model for testing only
-        cfg, _ = get_resume(cfg, model_kwargs)
+        cfg, model = get_resume(cfg, model_kwargs)
         os.chdir(cfg.general.test_only.split('checkpoints')[0])
     elif cfg.general.resume is not None:
         # Resume training with possible config overrides
-        cfg, _ = get_resume_adaptive(cfg, model_kwargs)
+        cfg, model = get_resume_adaptive(cfg, model_kwargs)
         os.chdir(cfg.general.resume.split('checkpoints')[0])
 
     utils.create_folders(cfg)
 
-    # Create model
-    if cfg.model.type == 'discrete':
-        model = DiscreteDenoisingDiffusion(cfg=cfg, **model_kwargs)
-    else:
-        model = LiftedDenoisingDiffusion(cfg=cfg, **model_kwargs)
+    # Create model if it hasn't been loaded from a checkpoint
+    if model is None:
+        if cfg.model.type == 'discrete':
+            model = DiscreteDenoisingDiffusion(cfg=cfg, **model_kwargs)
+        else:
+            model = LiftedDenoisingDiffusion(cfg=cfg, **model_kwargs)
+            
+    # <<< --- END OF CORRECTION --- >>>
 
     # Setup callbacks
     callbacks = []

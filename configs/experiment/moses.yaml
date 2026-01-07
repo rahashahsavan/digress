@@ -1,8 +1,13 @@
 # @package _global_
+defaults:
+  - override /dataset: moses.yaml
+  - override /model: discrete.yaml
+  - override /general: general_default.yaml
+  
 general:
-    name : 'moses'
+    name : 'moses_forman_new1'
     gpus : 1
-    wandb: 'online'
+    wandb: 'offline'
     remove_h: True
     resume: null
     test_only: null
@@ -24,7 +29,7 @@ train:
     batch_size: 256
     save_model: True
     lr: 2e-4
-    num_workers: 4
+    num_workers: 8
 model:
     n_layers: 12
     lambda_train: [5, 0]
@@ -33,7 +38,7 @@ model:
     model: 'graph_tf'
     diffusion_steps: 500
     diffusion_noise_schedule: 'cosine'              # 'cosine', 'polynomial_2'
-    extra_features: 'all'                              # 'all', 'cycles', 'eigenvalues' or null
+    extra_features: 'all_forman_ricci'                             # 'all', 'cycles', 'eigenvalues' or null
 
   # Do not set hidden_mlp_E, dim_ffE too high, computing large tensors on the edges is costly
   # At the moment (03/08), y contains quite little information

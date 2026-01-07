@@ -1,13 +1,12 @@
 # General settings
 name: 'graph-tf-model'      # Warning: 'debug' and 'test' are reserved name that have a special behavior
 
-wandb: 'online'             # online | offline | disabled
+wandb: 'offline'             # online | offline | disabled
 gpus: 1                     # Multi-gpu is not implemented on this branch
 
 
-resume: null            # If resume, path to ckpt file from outputs directory in main directory
+resume: null         # If resume, path to ckpt file from outputs directory in main directory
 test_only: null         # Use absolute path
-freeze_transformer: false  # If true, freeze transformer layers and only train input/output MLPs (useful for transfer learning with new features)
 
 check_val_every_n_epochs: 5
 sample_every_val: 4
